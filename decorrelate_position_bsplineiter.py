@@ -13,7 +13,6 @@
 #   - able to handle nan's for light curve values
 
 import numpy as np
-import matplotlib.pyplot as plt
 import cPickle as pickle
 from joblib import Parallel, delayed
 from sklearn.decomposition import PCA as PCA
@@ -23,6 +22,13 @@ from scipy.interpolate import splev
 from scipy.interpolate import splrep
 import copy
 
+from signal import signal, SIGPIPE, SIG_DFL # As per https://stackoverflow.com/questions/14207708/ioerror-errno-32-broken-pipe-python
+signal(SIGPIPE, SIG_DFL) 
+
+# The minimum number of points needed in the time chunk to bother fitting a spline
+num_point_to_fit_spline = 20
+
+
 minimum_value = 1 # This minimum cadence value
 maximum_value = 3856 # The maximum cadence value
 n_jobs = 30 # The number of jobs to run in parallel
@@ -30,9 +36,6 @@ n_arclength_bins = 15 # Number of bins in arclength into which to bin the data
 
 min_n_points_in_window_to_decorrelate = 10 # This is the minimum number of light curve points that need
 # to be in a cadence window to run the decorrelation
-
-#extra_to_skip = [192,193,194,195,196,197,198,199,200,201,204] # more cadences to skip b/c not conducive to Vanderburg analysis
-#print("*********************************\n\nWe are still doing extra_to_skip\n\n********************************")
 
 # Pickle file for positions over time
 import calculate_posovertime_pickle
@@ -46,19 +49,9 @@ cadence_number_divisions = [49+1, 570, 1084, 1600, 2154, 2570, 2995, 3419] # 8 d
 cadence_number_divisions.insert(0,minimum_value) # To get the first, original bounding value
 cadence_number_divisions.append(maximum_value) # To get the last bounding value
 
-# Frames to skip, and the cadences to use
+# Frames to skip
 to_skip = pickle.load( open( "../skip_cadences/to_skip.p", "rb" ) ) # normal to skip
-#cadences = [val for val in range(minimum_value, maximum_value+1) if val not in to_skip] # Set of cadences without the extra_to_skip ones removed
 
-# List of known RR Lyrae
-known_rrlyrae = []
-with open("../match_reference_to_gaia/list_of_rrlyrae.txt", "r") as f:
-    known_rrlyrae = [val.strip("\n") for val in f.readlines()]
-
-# List of stars significantly blended with the RR Lyrae, won't be able to do an accurate decorrelation on the light curves as they are now
-probable_rrlyrae_blends = []
-with open("../match_reference_to_gaia/list_of_rrlyrae_blends.txt", "r") as f:
-    probable_rrlyrae_blends = [val.strip("\n") for val in f.readlines()]
 
 def get_number_of_apertures():
     """
@@ -85,7 +78,7 @@ def is_close(a, b, rel_tol=1e-09, abs_tol=0.0):
     return abs(a-b) <= max(rel_tol * max(abs(a), abs(b)), abs_tol)
 
 
-def calc_arclength(min_bound, max_bound, dy_dx):
+def calc_arclength_integral(min_bound, max_bound, dy_dx):
     """
     This integrates the path length along y(x) given its  
     derivative, dy_dx, and the given min_bound and
@@ -121,10 +114,79 @@ def reject_outliers_stddev(data, n_sigma = 3.): # Thanks to https://stackoverflo
     return data[abs(data - np.mean(data)) < n_sigma * stddev]
 
 
+def which_stddev_outliers_toexclude(y,splined_values,nsigma=3.):
+    """
+    This function determines which indices of y have
+    |y - splined_values| < nsigma * sigma, after
+    calculating sigma = stddev(y)
+    """
+
+    if len(y) != len(splined_values):
+        print len(y)
+        print len(splined_values)
+        raise RuntimeError("y and splined_values are different lengths!")
+
+    sigma = np.std(y)
+    indices_of_outliers = [i for i in range(len(y)-1,-1,-1) if abs(y[i] - splined_values[i]) > nsigma*sigma]
+    return indices_of_outliers
+
+
+def check_breakpoints_have_data_between(times,breakpoints):
+    ## Check that all the breakpoints have data in them, and fix if not
+    if len(breakpoints) == 0:
+        return []
+    breakpoint_to_remove = []
+    for i in range(len(breakpoints)):
+        if i == 0:
+            lower_val = times[0]
+            upper_val = breakpoints[0]
+        elif i == len(breakpoints)-1:
+            lower_val = breakpoints[-1]
+            upper_val = times[-1]
+        else:
+            lower_val = breakpoints[i-1]
+            upper_val = breakpoints[i]
+        for val in times: # If there's a value in between
+            if lower_val < val < upper_val:
+                break
+        else: # If there's no value in between
+            breakpoint_to_remove.append(i)
+    return breakpoint_to_remove
+
+
+
+
 def object_preparation(obj,cadence_number_divisions_):
     obj.calc_cadence_window_indices(cadence_number_divisions_)
     obj.calc_arclength()
 
+
+num_steps = 8
+def flatten_and_decorrelate(obj):
+    i = 0
+    previous_summeddiff = 0.
+    while i < num_steps:
+        i += 1
+        if i > 1:
+            obj.normalized_fluxes = list(obj.decorr_normalized_fluxes)
+        obj.pre_decorrelation_filtering()
+        vanderburg_decorrelation(obj,i)
+        filtered = filter(lambda o: not np.isnan(o[0]) and not np.isnan(o[1]), zip(obj.previous_normalized_fluxes, obj.decorr_normalized_fluxes))
+        if len(filtered) == 0:
+            "zero-length filtered"
+            break
+        old, new = zip(*filtered)
+        summed_diff = sum([abs(a-b) for a,b in zip(old,new)])
+
+        summeddiff_reduced = summed_diff/float(len(old))
+        if summeddiff_reduced <= 1e-5 or is_close(summeddiff_reduced,previous_summeddiff,rel_tol=2e-5, abs_tol=2e-5): #If converged
+            #print " num to converge: ", i
+            break
+        else:
+            previous_summeddiff = summeddiff_reduced
+    #else:
+    #    print " **Wasn't able to converge in ", num_steps, " steps: ", obj.object_info.ID, " ", obj.aperture_num
+    return obj
 
 
 
@@ -142,24 +204,9 @@ class one_object:
         self.image_x = image_x_
         self.image_y = image_y_
         self.length = len(self.cadence_nos)
-        #self.cadence_window_id = None
-        #self.bin_id = None
         self.cadence_window_indices = None
         self.arc_length = None
 
-    """    
-    def assign_cadence_window_id(self, cadence_window_edges):
-        if min(self.cadence_nos) < min(cadence_window_edges):
-            raise RuntimeError("The minimum cadence value is less than the minimum bin_edge value")
-        if max(self.cadence_nos) > max(cadence_window_edges):
-            raise RuntimeError("The maximum cadence value is greater than the maximum bin_edge value")
-        temp = np.digitize(self.cadence_nos, cadence_window_edges, right=False)
-        if min(temp) == 0:
-            raise RuntimeError("np.digitize returned a value below the bottom of the bin edges")
-        if max(temp) == len(cadence_window_edges):
-            raise RuntimeError("np.digitize returned a value above the top of the bin edges")
-        self.cadence_window_id = temp
-    """
 
     def calc_cadence_window_indices(self, cadence_window_edges):
         if min(self.cadence_nos) < min(cadence_window_edges):
@@ -167,22 +214,25 @@ class one_object:
         if max(self.cadence_nos) > max(cadence_window_edges):
             raise RuntimeError("The maximum cadence value is greater than the maximum bin_edge value")
         temp = []
-        for val in cadence_window_edges:
+        which_are_at_end = []
+        for i in range(len(cadence_window_edges)):
             try:
-                temp.append(self.cadence_nos.index(val))
+                temp.append(self.cadence_nos.index(cadence_window_edges[i]))
             except ValueError:
-                temp.append(bisect.bisect_right(self.cadence_nos, val))
-        temp[-1] = temp[-1] + 1 # To get a number that will include the actual last position
+                if cadence_window_edges[i] > self.cadence_nos[-1]: # If we are looking past the last available cadence number, make sure to not exceed the end of the array
+                    temp.append(len(self.cadence_nos)-1)
+                    which_are_at_end.append(i)
+                else:
+                    temp.append(bisect.bisect_right(self.cadence_nos, cadence_window_edges[i]))
+        if len(which_are_at_end) > 0:
+            for j in which_are_at_end:
+                temp[j] = temp[j] + 1
+        else:
+            temp[-1] = temp[-1] + 1 # To get a number that will include the actual last position
         self.cadence_window_indices = temp
 
-    """
-    def assign_bins(self, bin_edges):
-        if min(self.cadence_nos) < min(bin_edges):
-            raise RuntimeError("The minimum cadence value is less than the minimum bin_edge value")
-        if max(self.cadence_nos) > max(bin_edges):
-            raise RuntimeError("The maximum cadence value is greater than the maximum bin_edge value")
-        self.bin_id = np.digitize(self.cadence_nos, bin_edges, right=True)
-    """
+
+
 
     def calc_arclength(self):
         if self.cadence_window_indices is None:
@@ -195,7 +245,6 @@ class one_object:
 
             # Use PCA to get the two main components of the data
             pca_touse = PCA(n_components=2, copy=True, svd_solver='auto', random_state=int(self.ID))
-            #print pca_touse.fit_transform([[x,y] for x,y in zip(x_touse,y_touse)])
             transformed_positions = pca_touse.fit_transform([[x,y] for x,y in zip(x_touse,y_touse)])
             transformed_x, transformed_y = zip(*transformed_positions)
 
@@ -212,7 +261,7 @@ class one_object:
             # Now calculate arc length
             arc_length_ = []
             for val in transformed_x:
-                arc_length_.append(calc_arclength(0., val, dy_dx))
+                arc_length_.append(calc_arclength_integral(0., val, dy_dx))
 
             arc_length_holder.extend(arc_length_)
 
@@ -239,7 +288,15 @@ class one_object_one_aperture:
         self.errors = errors
         self.centroid_x = centroid_x
         self.centroid_y = centroid_y
+        self.decorr_flux = None
+        self.decorr_normalized_fluxes = None
         self.decorr_magnitudes = None
+        self.previous_normalized_fluxes = None # For storing the previous normalized fluxes to find when convergence occurs
+
+        ##
+        self.x_of_fit = None
+        self.y_of_fit = None
+        ##
 
         # Now, remove nan's from the light curve, and remove the corresponding values
         # (like cadence number) from the object info
@@ -281,73 +338,178 @@ class one_object_one_aperture:
         # Update length
         self.object_info.length = len(self.object_info.cadence_nos)
 
+        # Now, convert magnitudes to flux and also calculate a median normalized flux
+        self.fluxes = np.power(10.,np.multiply(-0.4,self.magnitudes))
+        self.median_flux = np.median(self.fluxes)
+        self.normalized_fluxes = self.fluxes/self.median_flux
+
         # And redo the calculation of bin indices
         if len(filtered) == 0:
             self.object_info.cadence_window_indices = []
         else:
             self.object_info.calc_cadence_window_indices(cad_divisions)
 
-    def pre_decorrelation_filtering():
+    def pre_decorrelation_filtering(self):
         """
         This method filters low-frequency variations from the object's fluxes
         preparatory to the Vanderburg decorrelation.
         """
-        breakpoint_time_length = 1.5
+        self.previous_normalized_fluxes = copy.deepcopy(self.normalized_fluxes) # Get the current normalized fluxes to save for later
 
-        """
-        From Melinda Soares-Furtado
-        ####Determine Bins for High-Pass Filter :1 Day Bins:#######################
-        ####Cadence Intervals of 48 is about one day################################
-        binsize=48
-        beginningbin=Cadence[0]
-        Reduced_Cadence=[]
-        Reduced_Rel_Flux=[]
-        for i in range(0,32):
-            date=(Cadence[i]+binsize*(i+1)-beginningbin)/2+beginningbin
-            Reduced_Cadence.append(date)
-            tmp=[]
-            weightstmp=[]
-            for j in range(0,len(Cadence)):
-                if (int(Cadence[j]) >= beginningbin) and  (int(Cadence[j]) < Cadence[i]+binsize*(i+1)):
-                    tmp.append(flux[j])
-                    weightstmp.append(Weights1[j])
-            Reduced_Rel_Flux.append(np.average(tmp,weights=weightstmp))
-            beginningbin=Cadence[i]+binsize*(i+1)
-        SmoothedDates = np.linspace(Reduced_Cadence[0], max(Reduced_Cadence), 1000)
-        tck4 = splrep(Reduced_Cadence,Reduced_Rel_Flux,k=1)
-        Smoothed_Reduced_Rel_Flux = splev(SmoothedDates, tck4)   #breaks here
-        Flux_highpass=[0]*len(flux)
-        for t in range(0,len(flux)):
-            indexval=find_nearest(SmoothedDates,Cadence[t])
-            Flux_highpass[t]=flux[t]/Smoothed_Reduced_Rel_Flux[indexval]
-        """
-        t_min = self.object_info.BJD[0]
-        t_max = self.object_info.BJD[-1]
-        n_time_breakpoints = (t_max - t_min)/breakpoint_time_length
-        n_time_breakpoints = int(round(n_time_breakpoints))
-        breakpoints = np.linspace(t_min,t_max,num=n_time_breakpoints)
-        breakpoints = breakpoints[1:-1]
-        bspline_rep = splrep(x,y,t=breakpoints)
-        splined_values = splev(x,bspline_rep)
+        breakpoint_time_length = 1.5 # the length in days of the filter width
+        
+        x_of_fit_collect = []
+        y_of_fit_collect = []
+        values_to_normalize_by = []
+
+        for ii in range(len(self.object_info.cadence_window_indices)-1):
+            if ii == 0 and skip_first_cadence_division:
+                # Skip any calculation for the cadences in the first cadence division (there shouldn't be
+                # any observations left in this cadence division anyway)
+                continue
+            else:
+                # Set the indices to be used
+                lower_index = self.object_info.cadence_window_indices[ii]
+                upper_index = self.object_info.cadence_window_indices[ii+1]
+            if lower_index == upper_index: # If there is nothing to calculate in this time window
+                continue
+            
+            # Figure out times to use for the spline fit (reaching beyond the cadence window)
+            if not lower_index == 0: # If we're not on the smallest index
+                lower_time = self.object_info.BJD[lower_index] - breakpoint_time_length/2.
+                fitting_lower_index = bisect.bisect_left(self.object_info.BJD,lower_time)
+                if fitting_lower_index > lower_index:
+                    print fitting_lower_index
+                    print lower_index
+                    raise RuntimeError("The fitting lower index is higher than the nominal lower index")
+            else:
+                fitting_lower_index = lower_index
+            if not upper_index == self.object_info.length: # If we're not on the largest index
+                upper_time = self.object_info.BJD[upper_index - 1] + breakpoint_time_length/2.
+                fitting_upper_index = bisect.bisect_left(self.object_info.BJD,upper_time)
+                if fitting_upper_index < upper_index-1:
+                    print fitting_upper_index
+                    print upper_index
+                    raise RuntimeError("The fitting upper index is higher than the nominal upper index")
+            else:
+                fitting_upper_index = upper_index
+            # calculate breakpoint locations
+            t_min = self.object_info.BJD[fitting_lower_index]
+            t_max = self.object_info.BJD[fitting_upper_index-1]
+            # If we don't have enough points to reliably fit a spline, skip this time chunk
+            if (upper_index - lower_index) < num_point_to_fit_spline or (t_max - t_min) < breakpoint_time_length:
+                values_to_normalize_by.extend([1.0]*(upper_index - lower_index))
+                continue
+            n_time_breakpoints = (t_max - t_min)/breakpoint_time_length
+            n_time_breakpoints = int(round(n_time_breakpoints))
+            breakpoints = np.linspace(t_min,t_max,num=n_time_breakpoints)
+            breakpoints = breakpoints[1:-1]
+
+            # put the fluxes and times in temporary arrays
+            x = list(self.object_info.BJD[fitting_lower_index:fitting_upper_index+1])
+            y = list(self.normalized_fluxes[fitting_lower_index:fitting_upper_index+1])
+
+            ## Check that all the breakpoints have data in them, and fix if not
+            breakpoint_to_remove = check_breakpoints_have_data_between(x,breakpoints)
+            # Remove those values
+            if breakpoint_to_remove:
+                print "&&&&&&&&&&&&&&&&"
+                print "We had some breakpoints to remove!!!"
+                print ""
+                print breakpoint_to_remove
+                print ""
+                print "&&&&&&&&&&&&&&&&"
+                breakpoint_to_remove.reverse()
+                for val in breakpoint_to_remove:
+                    breakpoints = np.delete(breakpoints,val)
+
+            # iterate over spline fitting until converged (i.e., number of new points to exclude is zero in a particular iteration)
+            num_points_excluded = 1
+            num_loops = 0
+            while num_points_excluded != 0:
+                # create and fit the spline
+                bspline_rep = splrep(x,y,t=breakpoints)
+                splined_values = splev(x,bspline_rep)
+
+                # figure out which ones to sigma-exclude, and then remove them
+                which_ones_to_remove = which_stddev_outliers_toexclude(y,splined_values,nsigma=3.)
+                for i in which_ones_to_remove:
+                    _ = x.pop(i)
+                    _ = y.pop(i)
+                num_points_excluded = len(which_ones_to_remove)
+                if len(breakpoints) > 1:
+                    if num_points_excluded >= 1 and (breakpoints[0] < x[0] or breakpoints[-1] > x[-1]): #If some points are excluded and the breakpoints are no longer okay, recalculate breakpoints
+                        if breakpoints[0] < x[0]:
+                            t_min = x[0] - breakpoint_time_length/2.
+                        if breakpoints[-1] > x[-1]:
+                            t_max = x[-1] + breakpoint_time_length/2.
+                        n_time_breakpoints = (t_max - t_min)/breakpoint_time_length
+                        n_time_breakpoints = int(round(n_time_breakpoints))
+                        breakpoints = np.linspace(t_min,t_max,num=n_time_breakpoints)
+                        breakpoints = breakpoints[1:-1]
+                        if breakpoints[0] < x[0] or breakpoints[-1] > x[-1]: # Double check to make sure we didn't screw things up
+                            print breakpoints
+                            print x[0]
+                            print x[-1]
+                            raise RuntimeError("Messed up the breakpoint re-calculation")
+                else:
+                    print "length of breakpoints was zero, ", self.object_info.ID, self.aperture_num, num_loops
+                if num_points_excluded >= 1:
+                    ## Check that all the breakpoints have data in them, and fix if not
+                    breakpoint_to_remove = check_breakpoints_have_data_between(x,breakpoints)
+                    # Remove those values
+                    if breakpoint_to_remove:
+                        print "&&&&&&&&&&&&&&&&"
+                        print "We had some breakpoints to remove!!!"
+                        print ""
+                        print breakpoint_to_remove
+                        print ""
+                        print "&&&&&&&&&&&&&&&&"
+                        breakpoint_to_remove.reverse()
+                        for val in breakpoint_to_remove:
+                            breakpoints = np.delete(breakpoints,val)
+                ############
+                num_loops += 1
+            if num_loops > 20:
+                print "Object ", self.object_info.ID, " had a very much larger than normal number of loops in the spline fitting: ", num_loops
+
+            ##
+            xp = np.linspace(self.object_info.BJD[lower_index],self.object_info.BJD[upper_index-1],500)
+            yp = splev(xp,bspline_rep)
+            x_of_fit_collect.append(xp)
+            y_of_fit_collect.append(yp)
+            ##    
+
+            # Save the values to normalize by
+            splev(self.object_info.BJD,bspline_rep)
+            values_to_normalize_by.extend(splev(self.object_info.BJD[lower_index:upper_index],bspline_rep))
+        # Now, normalize by the calculated spline
+        if len(self.normalized_fluxes) != len(values_to_normalize_by):
+            print len(self.normalized_fluxes)
+            print len(values_to_normalize_by)
+            raise RuntimeError("The splined values to normalize by were not the same length as the values to normalize")
+        temp = [val[0]/val[1] for val in zip(self.normalized_fluxes,values_to_normalize_by)]
+        self.normalized_fluxes = temp
+
+        # Save the values for the spline fit to use to plot later
+        self.x_of_fit = x_of_fit_collect
+        self.y_of_fit = y_of_fit_collect
+
+        # Double check that it's still the correct length
+        if len(self.normalized_fluxes) != self.object_info.length:
+            print len(self.normalized_fluxes)
+            print self.object_info.length
+            raise RuntimeError("After normalizing fluxes by spline fit, the lengths changed.")
         
 
-        
 
-
-def vanderburg_decorrelation(an_object_an_aperture):
+def vanderburg_decorrelation(an_object_an_aperture,iternum):
     """
     Run the Vanderburg decorrelation for a one_object instance, an_object.
     Loops over all the apertures.
     """
     if not isinstance(an_object_an_aperture,one_object_one_aperture):
         raise RuntimeError("an_object is not a one_object instance")
-
-    #print an_object_an_aperture.object_info.ID, " decorrelating"
-
-    fluxes = np.power(10.,np.multiply(-0.4,an_object_an_aperture.magnitudes))
-    #print "len fluxes: ",len(fluxes)
-    fluxes_median = np.median(fluxes)
-    fluxes_norm = [val/fluxes_median for val in fluxes]
 
     normalization_values = []
                     
@@ -356,7 +518,6 @@ def vanderburg_decorrelation(an_object_an_aperture):
             # Skip any calculation for the cadences in the first cadence division (there shouldn't be
             # any observations left in this cadence division anyway)
             continue
-            #normalization_values.extend( [1.] * an_object_an_aperture.object_info.cadence_window_indices[1])
         else:
             # Set the indices to be used
             lower_index = an_object_an_aperture.object_info.cadence_window_indices[i]
@@ -364,9 +525,6 @@ def vanderburg_decorrelation(an_object_an_aperture):
 
             # Extract which data to be used
             arc_length_to_use = an_object_an_aperture.object_info.arc_length[lower_index:upper_index]
-            #if len(arc_length_to_use) < 10:
-            #    print lower_index,upper_index, "   ", an_object_an_aperture.object_info.ID
-            #    #print "here: ", arc_length_to_use
             # If there are no magnitudes in this cadence window to calculate on, skip any calculation
             if len(arc_length_to_use) == 0:
                 continue
@@ -374,7 +532,7 @@ def vanderburg_decorrelation(an_object_an_aperture):
                 print an_object_an_aperture.object_info.ID, "   ", i, "  too few points to decorrelate against"
                 normalization_values.extend([1.]*len(arc_length_to_use))
                 continue
-            fluxes_norm_to_use= fluxes_norm[lower_index:upper_index]
+            fluxes_norm_to_use= an_object_an_aperture.normalized_fluxes[lower_index:upper_index]
 
             # Now to bin up the data and then reject outliers,
             # then find mean of each bin.
@@ -382,6 +540,14 @@ def vanderburg_decorrelation(an_object_an_aperture):
             dbin = bins[1] - bins[0]
             bin_midpoints = [0.5*(bins[k+1] + bins[k]) for k in range(len(bins)-1)]
             which_bin = np.digitize(arc_length_to_use, bins, right=True)
+            
+            pos_of_zero_values = np.where(which_bin == 0)[0]
+            if len(pos_of_zero_values) == 0:
+                raise RuntimeError("The minimum value didn't fall outside the bound?")
+            if len(pos_of_zero_values) > 1:
+                raise RuntimeError("There is more than 1 point that fell below the bounds.")
+            which_bin[pos_of_zero_values[0]] = 1
+            
             binned_data = [np.array(fluxes_norm_to_use)[which_bin == k] for k in range(1, len(bins))]
             binned_arclength = [np.array(arc_length_to_use)[which_bin == k] for k in range(1, len(bins))]
 
@@ -420,25 +586,33 @@ def vanderburg_decorrelation(an_object_an_aperture):
                 means_across_bins[-2] = means_across_bins[-3] + .5*(means_across_bins[-3] - means_across_bins[-4])
 
             if means_across_bins[0] < 0.:
-                print "Zero first bin", len(binned_data[0]), an_object_an_aperture.object_info.ID, an_object_an_aperture.aperture_num
+                print "Zero first bin       ", len(binned_data[0]), an_object_an_aperture.object_info.ID, an_object_an_aperture.aperture_num
+                print "iter num: ", iternum
+                print binned_data[0]
 
             if means_across_bins[-1] < 0.:
-                print "Zero last bin", len(binned_data[-1]), an_object_an_aperture.object_info.ID, an_object_an_aperture.aperture_num
+                print "Zero last bin    ", len(binned_data[-1]), an_object_an_aperture.object_info.ID, an_object_an_aperture.aperture_num
+                print "iter num: ", iternum
+                print binned_data[-1]
 
             # Now the values to decorrelate against
             decorrelation_values = np.interp(arc_length_to_use,bin_midpoints,means_across_bins,left=None,right=None)
             normalization_values.extend(decorrelation_values)
 
 
-    if len(fluxes_norm) != len(normalization_values):
-        print len(fluxes_norm)
+    if len(an_object_an_aperture.normalized_fluxes) != len(normalization_values):
+        print len(an_object_an_aperture.normalized_fluxes)
         print len(normalization_values)
-        raise RuntimeError("fluxes_norm and normalization_values do not have the same length")
-    decorrelated_norm_lc = [fluxes_norm[k]/normalization_values[k] for k in range(len(fluxes_norm))]
-    refluxed_decorrelated_lc = np.multiply(decorrelated_norm_lc, fluxes_median)
+        raise RuntimeError("the object's normalized fluxes and normalization_values do not have the same length")
+    decorrelated_norm_lc = [an_object_an_aperture.normalized_fluxes[k]/normalization_values[k] for k in range(len(an_object_an_aperture.normalized_fluxes))]
+    refluxed_decorrelated_lc = np.multiply(decorrelated_norm_lc, an_object_an_aperture.median_flux)
     remagnituded_decorrelated_lc = -2.5*np.log10(refluxed_decorrelated_lc)
 
+    an_object_an_aperture.decorr_flux = refluxed_decorrelated_lc
+    an_object_an_aperture.decorr_normalized_fluxes = decorrelated_norm_lc
     an_object_an_aperture.decorr_magnitudes = remagnituded_decorrelated_lc
+
+    return copy.deepcopy(an_object_an_aperture)
 
 
 def save_lightcurve_to_file(an_object_ap_instance, output_filename,comments=None):
@@ -477,32 +651,23 @@ def save_lightcurve_to_file(an_object_ap_instance, output_filename,comments=None
 
 
 
-def main():
-    
-    # First try reading in the dicts that store the x and y positions
-    try:
-        with open(pos_over_time_pickle_filename, "rb") as f:
-            x_pos_dict, y_pos_dict = pickle.load(f)
-        print "Pickle file ", pos_over_time_pickle_filename ," found, and opened"
+def one_chunk(chunk_num,num_chunks,gaiaID_list,image_x,image_y,x_pos_dict,y_pos_dict):
+    print "  Running chunk ", chunk_num, " out of ", num_chunks
 
-    except IOError:
-        raise IOError("No Pickle file ",pos_over_time_pickle_filename," found.")
+    #index_min = chunk_num*chunksize
+    #if chunk_num == num_chunks:
+    #    index_max = len(gaiaID_list_full)
+    #else:
+    #    index_max = (chunk_num+1)*chunksize
 
-
-    # Now to store all the information for all the objects
-    # Open a file to find some of the appropriate information
-    
-    gaiaID_list = np.genfromtxt("gaia_transformed_lists/gaia_transformed_1.txt",
-                                                 dtype=str,usecols=0,unpack=True)
-    #gaiaID_list = gaiaID_list[:1]#[:30]
-    gaia_magnitudes, image_x, image_y = np.genfromtxt("gaia_transformed_lists/gaia_transformed_1.txt",
-                                                 usecols=(3,6,7),unpack=True)
     all_objects = []
-    #for ID in gaiaID_list[:3]:
-    print "starting creating the objects"
+    #gaiaID_list = gaiaID_list_full[index_min:index_max]
+    #image_x = image_x_full[index_min:index_max]
+    #image_y = image_y_full[index_min:index_max]
+    print "starting creating the objects for chunk ", chunk_num, " out of ", num_chunks
     for i in range(len(gaiaID_list)):
-        if i%200 == 0:
-            print float(i)/float(len(gaiaID_list)) * 100.0, "% done making object instances"
+        #if gaiaID_list[i] not in objects_wanted:
+        #    continue
         x_pos = x_pos_dict[gaiaID_list[i]]
         y_pos = y_pos_dict[gaiaID_list[i]]
         if len(x_pos) != len(y_pos):
@@ -518,78 +683,106 @@ def main():
 
         all_objects.append(one_object(gaiaID_list[i],cadence_nos,BJD,image_x[i],image_y[i],x_pos,y_pos))
 
-    print "Now calling run_cadence_window_assignment_and_arclength_calc()"
-    #arclength_output = Parallel(n_jobs=n_jobs)(delayed(run_cadence_window_assignment_and_arclength_calc)(obj) for obj in all_objects)
-    print "------------"
-    object_prep_output = Parallel(n_jobs=n_jobs, backend="threading")(delayed(object_preparation)(obj,cadence_number_divisions) for obj in all_objects)
-    #for obj in all_objects:
-    #    print obj.ID
-    #    obj.calc_cadence_window_indices(cadence_number_divisions)
-    #    obj.calc_arclength()
+    #print "Now calling run_cadence_window_assignment_and_arclength_calc(), chunk ", chunk_num
+    #print "------------"
+    for obj in all_objects:
+        object_preparation(obj,cadence_number_divisions)
 
-
-    #print all_objects[0].arc_length
-
-
+    # Now to loop over all the apertures for each object and get all the light curve information
     all_objects_with_lc = []
-    print "\nNow starting to read in the light curves to the objects"
+    print "\nNow starting to read in the light curves to the objects, chunk ", chunk_num
     for i in range(len(all_objects)):
-        print "i: ",i, "     ", all_objects[i].ID
-        if i%200 == 0:
-            print float(i)/float(len(all_objects)) * 100.0, "% done making object instances"
+        #print "i: ",i, "     ", object_prep_output[i].ID
+        #if i%200 == 0:
+        #    print float(i)/float(len(object_prep_output)) * 100.0, "% done making object instances"
         all_apertures_this_object = []
         for j in range(number_of_apertures):
-            print "j: ",j
+            #print "j: ",j
             mags_column_number = 13+5*j
             u,v,mags,errs = np.genfromtxt("../light_curves/grcollect_output/grcollect." +\
                               all_objects[i].ID + ".grcollout", usecols=(mags_column_number-2,
                                     mags_column_number-1,mags_column_number,mags_column_number+1),
                               missing_values='-',filling_values=float('nan'),unpack=True)
-            
+
             this_object_this_aperture = one_object_one_aperture(all_objects[i],mags,errs,u,v,
                            cadence_number_divisions,j)
 
-            all_apertures_this_object.append(this_object_this_aperture)
-
-        all_objects_with_lc.append(all_apertures_this_object)
+            all_objects_with_lc.append(this_object_this_aperture)
 
 
-    #vanderburg_decorrelation(all_objects_with_lc[0][0])
-
-    #vanderburg_decorrelation(all_objects_with_lc[0][0])
-    #vanderburg_decorrelation(all_objects_with_lc[1][0])
-    #vanderburg_decorrelation(all_objects_with_lc[2][0])
-    print "starting the decorrelation calculation"
-    decorrelation_output = Parallel(n_jobs=n_jobs, backend="threading")(delayed(vanderburg_decorrelation)(all_objects_with_lc[i][j]) for i in range(len(all_objects)) for j in range(number_of_apertures))
-    #decorrelation_output = Parallel(n_jobs=n_jobs)(delayed(f__)(all_objects_with_lc[i][j]) for i in range(len(all_objects)) for j in range(number_of_apertures))
-    #print all_objects_with_lc[0][0].magnitudes[900:915]
-    #print all_objects_with_lc[0][0].decorr_magnitudes[900:915]
-
-
-    #print all_objects[0].cadence_window_indices #[0, 49, 551, 1058, 1568, 2115, 2527, 2944, 3364, 3798]
+    print "\nNow running the flattening and decorrelation, chunk ", chunk_num, " of ", num_chunks
+    #decorrelation_output = Parallel(n_jobs=n_jobs)(delayed(flatten_and_decorrelate)(obj) for obj in all_objects_with_lc)
+    decorrelation_output = []
+    for obj in all_objects_with_lc:
+        flatten_and_decorrelate(obj)
 
 
 
-    #print all_objects[0].arc_length
 
+    print "\nStarting to save, chunk ", chunk_num, " of ", num_chunks
     objects_skipping = []
-
-    print "\nStarting to save"
     for i in range(len(all_objects_with_lc)):
-        if i%200 == 0:
-            print float(i)/float(len(all_objects_with_lc)) * 100.0, "% done saving"
-        for j in range(number_of_apertures):
-            #print all_objects_with_lc[i][j].object_info.length
-            if all_objects_with_lc[i][j].object_info.length == 0:
-                print "skipping..."
-                objects_skipping.append((all_objects_with_lc[i][j].object_info.ID, str(j)))
-                continue
-            save_lightcurve_to_file(all_objects_with_lc[i][j], 
-                                    "test_decorr_output/" + all_objects_with_lc[i][j].object_info.ID +\
-                                        "_" + str(j) + ".txt",
-                                    "# " + all_objects_with_lc[i][j].object_info.ID + "    ap:" + str(j))
+        #if i%400 == 0:
+        #    print float(i)/float(len(all_objects_with_lc)) * 100.0, "% done saving"
+        if all_objects_with_lc[i].object_info.length == 0:
+            #print "skipping..."
+            objects_skipping.append((all_objects_with_lc[i].object_info.ID, str(all_objects_with_lc[i].aperture_num)))
+            continue
+        save_lightcurve_to_file(all_objects_with_lc[i], 
+                                "decorr_output_iter/" + all_objects_with_lc[i].object_info.ID +\
+                                    "_" + str(all_objects_with_lc[i].aperture_num) + ".txt",
+                                "# " + all_objects_with_lc[i].object_info.ID + "    ap:" + str(all_objects_with_lc[i].aperture_num))
 
-    with open("list_of_skipped_objects.txt","w") as f:
+    return objects_skipping
+
+def main():
+
+    chunksize = 40 # How many objects to do at a time
+
+    #objects_wanted = []
+    #with open("../light_curves/full_lightcurves.txt","r") as f: # get objects with full light curves
+    #    text_file = f.readlines()
+    #    for i in range(1,len(text_file)): #1 to start is to skip comment line
+    #        objects_wanted.append(text_file[i].split()[0])
+    #objects_wanted = ['6045478043228461440']
+
+
+    
+    # First try reading in the dicts that store the x and y positions
+    try:
+        with open(pos_over_time_pickle_filename, "rb") as f:
+            x_pos_dict, y_pos_dict = pickle.load(f)
+        print "Pickle file ", pos_over_time_pickle_filename ," found, and opened"
+
+    except IOError:
+        raise IOError("No Pickle file ",pos_over_time_pickle_filename," found.")
+
+
+    # Now to store all the information for all the objects
+    # Open a file to find some of the appropriate information
+    
+    gaiaID_list_full = np.genfromtxt("gaia_transformed_lists/gaia_transformed_1.txt",
+                                                 dtype=str,usecols=0,unpack=True)
+    image_x_full, image_y_full = np.genfromtxt("gaia_transformed_lists/gaia_transformed_1.txt",
+                                                 usecols=(6,7),unpack=True)
+    
+    ## Now here, we will loop over a number of different chunks, to make memory manageable
+    num_chunks = len(gaiaID_list_full)/chunksize
+
+    #gaiaID_list = gaiaID_list_full[index_min:index_max]
+    #image_x = image_x_full[index_min:index_max]
+    #image_y = image_y_full[index_min:index_max]
+
+    list_of_iiis = range(num_chunks + 1)
+    all_objects_skipping = Parallel(n_jobs=n_jobs)(delayed(one_chunk)(iii,num_chunks,
+                                                                      gaiaID_list_full[iii*chunksize:(iii+1)*chunksize],
+                                                                      image_x_full[iii*chunksize:(iii+1)*chunksize],
+                                                                      image_y_full[iii*chunksize:(iii+1)*chunksize],
+                                                                      x_pos_dict,y_pos_dict) for iii in list_of_iiis)
+    print all_objects_skipping
+    quit()
+
+    with open("list_of_skipped_objects_iter.txt","w") as f:
         f.write("# These are object/aperture combinations that had all nans for their magnitude values\n")
         f.write("# Gaia_ID  aperture_num\n")
         for obj in objects_skipping:
