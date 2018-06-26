@@ -11,6 +11,9 @@
 #        the extra frames that were necessary to skip for this code
 #   - light curve information now stored as objects, for easier handling
 #   - able to handle nan's for light curve values
+from __future__ import absolute_import
+from __future__ import division
+from __future__ import print_function
 
 import numpy as np
 import matplotlib.pyplot as plt
@@ -70,7 +73,7 @@ def get_number_of_apertures():
         if "APERTURES=" in line and line[0] != '#':
             aperture_line = [item.strip("\n") for item in 
                              line.split("=")[1].split(",")]
-            print "Number of apertures: " + str(len(aperture_line))
+            print("Number of apertures: " + str(len(aperture_line)))
             break
     else:
         raise RuntimeError("Did not find the 'APERTURES' line in the file")
@@ -195,7 +198,7 @@ class one_object:
 
             # Use PCA to get the two main components of the data
             pca_touse = PCA(n_components=2, copy=True, svd_solver='auto', random_state=int(self.ID))
-            #print pca_touse.fit_transform([[x,y] for x,y in zip(x_touse,y_touse)])
+            #print(pca_touse.fit_transform([[x,y] for x,y in zip(x_touse,y_touse)]))
             transformed_positions = pca_touse.fit_transform([[x,y] for x,y in zip(x_touse,y_touse)])
             transformed_x, transformed_y = zip(*transformed_positions)
 
@@ -342,10 +345,10 @@ def vanderburg_decorrelation(an_object_an_aperture):
     if not isinstance(an_object_an_aperture,one_object_one_aperture):
         raise RuntimeError("an_object is not a one_object instance")
 
-    #print an_object_an_aperture.object_info.ID, " decorrelating"
+    #print(an_object_an_aperture.object_info.ID, " decorrelating")
 
     fluxes = np.power(10.,np.multiply(-0.4,an_object_an_aperture.magnitudes))
-    #print "len fluxes: ",len(fluxes)
+    #print("len fluxes: ",len(fluxes))
     fluxes_median = np.median(fluxes)
     fluxes_norm = [val/fluxes_median for val in fluxes]
 
@@ -365,13 +368,13 @@ def vanderburg_decorrelation(an_object_an_aperture):
             # Extract which data to be used
             arc_length_to_use = an_object_an_aperture.object_info.arc_length[lower_index:upper_index]
             #if len(arc_length_to_use) < 10:
-            #    print lower_index,upper_index, "   ", an_object_an_aperture.object_info.ID
-            #    #print "here: ", arc_length_to_use
+            #    print(lower_index,upper_index, "   ", an_object_an_aperture.object_info.ID)
+            #    #print("here: ", arc_length_to_use)
             # If there are no magnitudes in this cadence window to calculate on, skip any calculation
             if len(arc_length_to_use) == 0:
                 continue
             if len(arc_length_to_use) < min_n_points_in_window_to_decorrelate:
-                print an_object_an_aperture.object_info.ID, "   ", i, "  too few points to decorrelate against"
+                print(an_object_an_aperture.object_info.ID + "   " + str(i) + "  too few points to decorrelate against")
                 normalization_values.extend([1.]*len(arc_length_to_use))
                 continue
             fluxes_norm_to_use= fluxes_norm[lower_index:upper_index]
@@ -420,10 +423,10 @@ def vanderburg_decorrelation(an_object_an_aperture):
                 means_across_bins[-2] = means_across_bins[-3] + .5*(means_across_bins[-3] - means_across_bins[-4])
 
             if means_across_bins[0] < 0.:
-                print "Zero first bin", len(binned_data[0]), an_object_an_aperture.object_info.ID, an_object_an_aperture.aperture_num
+                print("Zero first bin" + str(len(binned_data[0])) +  an_object_an_aperture.object_info.ID + str(an_object_an_aperture.aperture_num))
 
             if means_across_bins[-1] < 0.:
-                print "Zero last bin", len(binned_data[-1]), an_object_an_aperture.object_info.ID, an_object_an_aperture.aperture_num
+                print("Zero last bin" + str(len(binned_data[-1])) + an_object_an_aperture.object_info.ID + str(an_object_an_aperture.aperture_num))
 
             # Now the values to decorrelate against
             decorrelation_values = np.interp(arc_length_to_use,bin_midpoints,means_across_bins,left=None,right=None)
@@ -431,8 +434,8 @@ def vanderburg_decorrelation(an_object_an_aperture):
 
 
     if len(fluxes_norm) != len(normalization_values):
-        print len(fluxes_norm)
-        print len(normalization_values)
+        print(len(fluxes_norm))
+        print(len(normalization_values))
         raise RuntimeError("fluxes_norm and normalization_values do not have the same length")
     decorrelated_norm_lc = [fluxes_norm[k]/normalization_values[k] for k in range(len(fluxes_norm))]
     refluxed_decorrelated_lc = np.multiply(decorrelated_norm_lc, fluxes_median)
@@ -456,7 +459,7 @@ def save_lightcurve_to_file(an_object_ap_instance, output_filename,comments=None
         if comments:
             comment_touse = comments
             if comment_touse[0] != '#':
-                print "Comments did not have a '#' character prepended, adding now"
+                print("Comments did not have a '#' character prepended, adding now")
                 comment_touse = "#" + comment_touse
 
             f.write(comment_touse + "\n")
@@ -483,7 +486,7 @@ def main():
     try:
         with open(pos_over_time_pickle_filename, "rb") as f:
             x_pos_dict, y_pos_dict = pickle.load(f)
-        print "Pickle file ", pos_over_time_pickle_filename ," found, and opened"
+        print("Pickle file " + pos_over_time_pickle_filename + " found, and opened")
 
     except IOError:
         raise IOError("No Pickle file ",pos_over_time_pickle_filename," found.")
@@ -499,10 +502,10 @@ def main():
                                                  usecols=(3,6,7),unpack=True)
     all_objects = []
     #for ID in gaiaID_list[:3]:
-    print "starting creating the objects"
+    print("starting creating the objects")
     for i in range(len(gaiaID_list)):
         if i%200 == 0:
-            print float(i)/float(len(gaiaID_list)) * 100.0, "% done making object instances"
+            print(str(float(i)/float(len(gaiaID_list)) * 100.0) + "% done making object instances")
         x_pos = x_pos_dict[gaiaID_list[i]]
         y_pos = y_pos_dict[gaiaID_list[i]]
         if len(x_pos) != len(y_pos):
@@ -511,35 +514,35 @@ def main():
         BJD, cadence_nos = np.genfromtxt("../light_curves/grcollect_output/grcollect." + gaiaID_list[i] +\
                             ".grcollout", usecols=(1,2),dtype=(float,int),unpack=True)
         if len(x_pos) != len(cadence_nos) or len(BJD) != len(cadence_nos):
-            print len(x_pos)
-            print len(cadence_nos)
-            print len(BJD)
+            print(len(x_pos))
+            print(len(cadence_nos))
+            print(len(BJD))
             raise RuntimeError("The lengths of the cadence_nos or BJD are messed up")
 
         all_objects.append(one_object(gaiaID_list[i],cadence_nos,BJD,image_x[i],image_y[i],x_pos,y_pos))
 
-    print "Now calling run_cadence_window_assignment_and_arclength_calc()"
+    print("Now calling run_cadence_window_assignment_and_arclength_calc()")
     #arclength_output = Parallel(n_jobs=n_jobs)(delayed(run_cadence_window_assignment_and_arclength_calc)(obj) for obj in all_objects)
-    print "------------"
+    print("------------")
     object_prep_output = Parallel(n_jobs=n_jobs, backend="threading")(delayed(object_preparation)(obj,cadence_number_divisions) for obj in all_objects)
     #for obj in all_objects:
-    #    print obj.ID
+    #    print(obj.ID)
     #    obj.calc_cadence_window_indices(cadence_number_divisions)
     #    obj.calc_arclength()
 
 
-    #print all_objects[0].arc_length
+    #print(all_objects[0].arc_length)
 
 
     all_objects_with_lc = []
-    print "\nNow starting to read in the light curves to the objects"
+    print("\nNow starting to read in the light curves to the objects")
     for i in range(len(all_objects)):
-        print "i: ",i, "     ", all_objects[i].ID
+        print("i: " + str(i) + "     " + all_objects[i].ID)
         if i%200 == 0:
-            print float(i)/float(len(all_objects)) * 100.0, "% done making object instances"
+            print(str(float(i)/float(len(all_objects))) * 100.0 + "% done making object instances")
         all_apertures_this_object = []
         for j in range(number_of_apertures):
-            print "j: ",j
+            print("j: " + str(j))
             mags_column_number = 13+5*j
             u,v,mags,errs = np.genfromtxt("../light_curves/grcollect_output/grcollect." +\
                               all_objects[i].ID + ".grcollout", usecols=(mags_column_number-2,
@@ -559,29 +562,29 @@ def main():
     #vanderburg_decorrelation(all_objects_with_lc[0][0])
     #vanderburg_decorrelation(all_objects_with_lc[1][0])
     #vanderburg_decorrelation(all_objects_with_lc[2][0])
-    print "starting the decorrelation calculation"
+    print("starting the decorrelation calculation")
     decorrelation_output = Parallel(n_jobs=n_jobs, backend="threading")(delayed(vanderburg_decorrelation)(all_objects_with_lc[i][j]) for i in range(len(all_objects)) for j in range(number_of_apertures))
     #decorrelation_output = Parallel(n_jobs=n_jobs)(delayed(f__)(all_objects_with_lc[i][j]) for i in range(len(all_objects)) for j in range(number_of_apertures))
-    #print all_objects_with_lc[0][0].magnitudes[900:915]
-    #print all_objects_with_lc[0][0].decorr_magnitudes[900:915]
+    #print(all_objects_with_lc[0][0].magnitudes[900:915])
+    #print(all_objects_with_lc[0][0].decorr_magnitudes[900:915])
 
 
-    #print all_objects[0].cadence_window_indices #[0, 49, 551, 1058, 1568, 2115, 2527, 2944, 3364, 3798]
+    #print(all_objects[0].cadence_window_indices #[0, 49, 551, 1058, 1568, 2115, 2527, 2944, 3364, 3798])
 
 
 
-    #print all_objects[0].arc_length
+    #print(all_objects[0].arc_length)
 
     objects_skipping = []
 
-    print "\nStarting to save"
+    print("\nStarting to save")
     for i in range(len(all_objects_with_lc)):
         if i%200 == 0:
-            print float(i)/float(len(all_objects_with_lc)) * 100.0, "% done saving"
+            print(str(float(i)/float(len(all_objects_with_lc)) * 100.0) + "% done saving")
         for j in range(number_of_apertures):
-            #print all_objects_with_lc[i][j].object_info.length
+            #print(all_objects_with_lc[i][j].object_info.length)
             if all_objects_with_lc[i][j].object_info.length == 0:
-                print "skipping..."
+                print("skipping...")
                 objects_skipping.append((all_objects_with_lc[i][j].object_info.ID, str(j)))
                 continue
             save_lightcurve_to_file(all_objects_with_lc[i][j], 

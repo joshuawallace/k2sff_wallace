@@ -11,6 +11,9 @@
 #        the extra frames that were necessary to skip for this code
 #   - light curve information now stored as objects, for easier handling
 #   - able to handle nan's for light curve values
+from __future__ import absolute_import
+from __future__ import division
+from __future__ import print_function
 
 import numpy as np
 import cPickle as pickle
@@ -63,7 +66,7 @@ def get_number_of_apertures():
         if "APERTURES=" in line and line[0] != '#':
             aperture_line = [item.strip("\n") for item in 
                              line.split("=")[1].split(",")]
-            print "Number of apertures: " + str(len(aperture_line))
+            print ("Number of apertures: " + str(len(aperture_line)))
             break
     else:
         raise RuntimeError("Did not find the 'APERTURES' line in the file")
@@ -122,8 +125,8 @@ def which_stddev_outliers_toexclude(y,splined_values,nsigma=3.):
     """
 
     if len(y) != len(splined_values):
-        print len(y)
-        print len(splined_values)
+        print (len(y))
+        print (len(splined_values))
         raise RuntimeError("y and splined_values are different lengths!")
 
     sigma = np.std(y)
@@ -180,12 +183,12 @@ def flatten_and_decorrelate(obj):
 
         summeddiff_reduced = summed_diff/float(len(old))
         if summeddiff_reduced <= 1e-5 or is_close(summeddiff_reduced,previous_summeddiff,rel_tol=2e-5, abs_tol=2e-5): #If converged
-            #print " num to converge: ", i
+            #print (" num to converge: ", i)
             break
         else:
             previous_summeddiff = summeddiff_reduced
     #else:
-    #    print " **Wasn't able to converge in ", num_steps, " steps: ", obj.object_info.ID, " ", obj.aperture_num
+    #    print (" **Wasn't able to converge in ", num_steps, " steps: ", obj.object_info.ID, " ", obj.aperture_num)
     return obj
 
 
@@ -379,8 +382,8 @@ class one_object_one_aperture:
                 lower_time = self.object_info.BJD[lower_index] - breakpoint_time_length/2.
                 fitting_lower_index = bisect.bisect_left(self.object_info.BJD,lower_time)
                 if fitting_lower_index > lower_index:
-                    print fitting_lower_index
-                    print lower_index
+                    print (fitting_lower_index)
+                    print (lower_index)
                     raise RuntimeError("The fitting lower index is higher than the nominal lower index")
             else:
                 fitting_lower_index = lower_index
@@ -388,8 +391,8 @@ class one_object_one_aperture:
                 upper_time = self.object_info.BJD[upper_index - 1] + breakpoint_time_length/2.
                 fitting_upper_index = bisect.bisect_left(self.object_info.BJD,upper_time)
                 if fitting_upper_index < upper_index-1:
-                    print fitting_upper_index
-                    print upper_index
+                    print (fitting_upper_index)
+                    print (upper_index)
                     raise RuntimeError("The fitting upper index is higher than the nominal upper index")
             else:
                 fitting_upper_index = upper_index
@@ -413,12 +416,12 @@ class one_object_one_aperture:
             breakpoint_to_remove = check_breakpoints_have_data_between(x,breakpoints)
             # Remove those values
             if breakpoint_to_remove:
-                print "&&&&&&&&&&&&&&&&"
-                print "We had some breakpoints to remove!!!"
-                print ""
-                print breakpoint_to_remove
-                print ""
-                print "&&&&&&&&&&&&&&&&"
+                print ("&&&&&&&&&&&&&&&&")
+                print ("We had some breakpoints to remove!!!")
+                print ("")
+                print (breakpoint_to_remove)
+                print ("")
+                print ("&&&&&&&&&&&&&&&&")
                 breakpoint_to_remove.reverse()
                 for val in breakpoint_to_remove:
                     breakpoints = np.delete(breakpoints,val)
@@ -448,30 +451,30 @@ class one_object_one_aperture:
                         breakpoints = np.linspace(t_min,t_max,num=n_time_breakpoints)
                         breakpoints = breakpoints[1:-1]
                         if breakpoints[0] < x[0] or breakpoints[-1] > x[-1]: # Double check to make sure we didn't screw things up
-                            print breakpoints
-                            print x[0]
-                            print x[-1]
+                            print (breakpoints)
+                            print (x[0])
+                            print (x[-1])
                             raise RuntimeError("Messed up the breakpoint re-calculation")
                 else:
-                    print "length of breakpoints was zero, ", self.object_info.ID, self.aperture_num, num_loops
+                    print ("length of breakpoints was zero, " + self.object_info.ID + " " +  str(self.aperture_num) + " " + str(num_loops))
                 if num_points_excluded >= 1:
                     ## Check that all the breakpoints have data in them, and fix if not
                     breakpoint_to_remove = check_breakpoints_have_data_between(x,breakpoints)
                     # Remove those values
                     if breakpoint_to_remove:
-                        print "&&&&&&&&&&&&&&&&"
-                        print "We had some breakpoints to remove!!!"
-                        print ""
-                        print breakpoint_to_remove
-                        print ""
-                        print "&&&&&&&&&&&&&&&&"
+                        print ("&&&&&&&&&&&&&&&&")
+                        print ("We had some breakpoints to remove!!!")
+                        print ("")
+                        print (breakpoint_to_remove)
+                        print ("")
+                        print ("&&&&&&&&&&&&&&&&")
                         breakpoint_to_remove.reverse()
                         for val in breakpoint_to_remove:
                             breakpoints = np.delete(breakpoints,val)
                 ############
                 num_loops += 1
             if num_loops > 20:
-                print "Object ", self.object_info.ID, " had a very much larger than normal number of loops in the spline fitting: ", num_loops
+                print ("Object " + self.object_info.ID + " had a very much larger than normal number of loops in the spline fitting: " + str(num_loops))
 
             ##
             xp = np.linspace(self.object_info.BJD[lower_index],self.object_info.BJD[upper_index-1],500)
@@ -485,8 +488,8 @@ class one_object_one_aperture:
             values_to_normalize_by.extend(splev(self.object_info.BJD[lower_index:upper_index],bspline_rep))
         # Now, normalize by the calculated spline
         if len(self.normalized_fluxes) != len(values_to_normalize_by):
-            print len(self.normalized_fluxes)
-            print len(values_to_normalize_by)
+            print (len(self.normalized_fluxes))
+            print (len(values_to_normalize_by))
             raise RuntimeError("The splined values to normalize by were not the same length as the values to normalize")
         temp = [val[0]/val[1] for val in zip(self.normalized_fluxes,values_to_normalize_by)]
         self.normalized_fluxes = temp
@@ -497,8 +500,8 @@ class one_object_one_aperture:
 
         # Double check that it's still the correct length
         if len(self.normalized_fluxes) != self.object_info.length:
-            print len(self.normalized_fluxes)
-            print self.object_info.length
+            print (len(self.normalized_fluxes))
+            print (self.object_info.length)
             raise RuntimeError("After normalizing fluxes by spline fit, the lengths changed.")
         
 
@@ -529,7 +532,7 @@ def vanderburg_decorrelation(an_object_an_aperture,iternum):
             if len(arc_length_to_use) == 0:
                 continue
             if len(arc_length_to_use) < min_n_points_in_window_to_decorrelate:
-                print an_object_an_aperture.object_info.ID, "   ", i, "  too few points to decorrelate against"
+                print (an_object_an_aperture.object_info.ID + "   " + str(i) + "  too few points to decorrelate against")
                 normalization_values.extend([1.]*len(arc_length_to_use))
                 continue
             fluxes_norm_to_use= an_object_an_aperture.normalized_fluxes[lower_index:upper_index]
@@ -586,14 +589,14 @@ def vanderburg_decorrelation(an_object_an_aperture,iternum):
                 means_across_bins[-2] = means_across_bins[-3] + .5*(means_across_bins[-3] - means_across_bins[-4])
 
             if means_across_bins[0] < 0.:
-                print "Zero first bin       ", len(binned_data[0]), an_object_an_aperture.object_info.ID, an_object_an_aperture.aperture_num
-                print "iter num: ", iternum
-                print binned_data[0]
+                print ("Zero first bin       " + str(len(binned_data[0])) + "  " + an_object_an_aperture.object_info.ID + "  " + stran_object_an_aperture.aperture_num))
+                print ("iter num: " + str(iternum))
+                print (binned_data[0])
 
             if means_across_bins[-1] < 0.:
-                print "Zero last bin    ", len(binned_data[-1]), an_object_an_aperture.object_info.ID, an_object_an_aperture.aperture_num
-                print "iter num: ", iternum
-                print binned_data[-1]
+                print ("Zero last bin    " + str(len(binned_data[-1])) + "  " + an_object_an_aperture.object_info.ID + "  " + str(an_object_an_aperture.aperture_num))
+                print ("iter num: " +  str(iternum))
+                print (binned_data[-1])
 
             # Now the values to decorrelate against
             decorrelation_values = np.interp(arc_length_to_use,bin_midpoints,means_across_bins,left=None,right=None)
@@ -601,8 +604,8 @@ def vanderburg_decorrelation(an_object_an_aperture,iternum):
 
 
     if len(an_object_an_aperture.normalized_fluxes) != len(normalization_values):
-        print len(an_object_an_aperture.normalized_fluxes)
-        print len(normalization_values)
+        print (len(an_object_an_aperture.normalized_fluxes))
+        print (len(normalization_values))
         raise RuntimeError("the object's normalized fluxes and normalization_values do not have the same length")
     decorrelated_norm_lc = [an_object_an_aperture.normalized_fluxes[k]/normalization_values[k] for k in range(len(an_object_an_aperture.normalized_fluxes))]
     refluxed_decorrelated_lc = np.multiply(decorrelated_norm_lc, an_object_an_aperture.median_flux)
@@ -630,7 +633,7 @@ def save_lightcurve_to_file(an_object_ap_instance, output_filename,comments=None
         if comments:
             comment_touse = comments
             if comment_touse[0] != '#':
-                print "Comments did not have a '#' character prepended, adding now"
+                print ("Comments did not have a '#' character prepended, adding now")
                 comment_touse = "#" + comment_touse
 
             f.write(comment_touse + "\n")
@@ -652,7 +655,7 @@ def save_lightcurve_to_file(an_object_ap_instance, output_filename,comments=None
 
 
 def one_chunk(chunk_num,num_chunks,gaiaID_list,image_x,image_y,x_pos_dict,y_pos_dict):
-    print "  Running chunk ", chunk_num, " out of ", num_chunks
+    print ("  Running chunk " + str(chunk_num) + " out of " + str(num_chunks))
 
     #index_min = chunk_num*chunksize
     #if chunk_num == num_chunks:
@@ -664,7 +667,7 @@ def one_chunk(chunk_num,num_chunks,gaiaID_list,image_x,image_y,x_pos_dict,y_pos_
     #gaiaID_list = gaiaID_list_full[index_min:index_max]
     #image_x = image_x_full[index_min:index_max]
     #image_y = image_y_full[index_min:index_max]
-    print "starting creating the objects for chunk ", chunk_num, " out of ", num_chunks
+    print ("starting creating the objects for chunk " + str(chunk_num) + " out of " + str(num_chunks))
     for i in range(len(gaiaID_list)):
         #if gaiaID_list[i] not in objects_wanted:
         #    continue
@@ -676,28 +679,28 @@ def one_chunk(chunk_num,num_chunks,gaiaID_list,image_x,image_y,x_pos_dict,y_pos_
         BJD, cadence_nos = np.genfromtxt("../light_curves/grcollect_output/grcollect." + gaiaID_list[i] +\
                             ".grcollout", usecols=(1,2),dtype=(float,int),unpack=True)
         if len(x_pos) != len(cadence_nos) or len(BJD) != len(cadence_nos):
-            print len(x_pos)
-            print len(cadence_nos)
-            print len(BJD)
+            print (len(x_pos))
+            print (len(cadence_nos))
+            print (len(BJD))
             raise RuntimeError("The lengths of the cadence_nos or BJD are messed up")
 
         all_objects.append(one_object(gaiaID_list[i],cadence_nos,BJD,image_x[i],image_y[i],x_pos,y_pos))
 
-    #print "Now calling run_cadence_window_assignment_and_arclength_calc(), chunk ", chunk_num
-    #print "------------"
+    #print ("Now calling run_cadence_window_assignment_and_arclength_calc(), chunk ", chunk_num)
+    #print ("------------")
     for obj in all_objects:
         object_preparation(obj,cadence_number_divisions)
 
     # Now to loop over all the apertures for each object and get all the light curve information
     all_objects_with_lc = []
-    print "\nNow starting to read in the light curves to the objects, chunk ", chunk_num
+    print ("\nNow starting to read in the light curves to the objects, chunk " + str(chunk_num))
     for i in range(len(all_objects)):
-        #print "i: ",i, "     ", object_prep_output[i].ID
+        #print ("i: ",i, "     ", object_prep_output[i].ID)
         #if i%200 == 0:
-        #    print float(i)/float(len(object_prep_output)) * 100.0, "% done making object instances"
+        #    print (float(i)/float(len(object_prep_output)) * 100.0, "% done making object instances")
         all_apertures_this_object = []
         for j in range(number_of_apertures):
-            #print "j: ",j
+            #print ("j: ",j)
             mags_column_number = 13+5*j
             u,v,mags,errs = np.genfromtxt("../light_curves/grcollect_output/grcollect." +\
                               all_objects[i].ID + ".grcollout", usecols=(mags_column_number-2,
@@ -710,7 +713,7 @@ def one_chunk(chunk_num,num_chunks,gaiaID_list,image_x,image_y,x_pos_dict,y_pos_
             all_objects_with_lc.append(this_object_this_aperture)
 
 
-    print "\nNow running the flattening and decorrelation, chunk ", chunk_num, " of ", num_chunks
+    print ("\nNow running the flattening and decorrelation, chunk " + str(chunk_num) + " of " + str(num_chunks))
     #decorrelation_output = Parallel(n_jobs=n_jobs)(delayed(flatten_and_decorrelate)(obj) for obj in all_objects_with_lc)
     decorrelation_output = []
     for obj in all_objects_with_lc:
@@ -719,13 +722,13 @@ def one_chunk(chunk_num,num_chunks,gaiaID_list,image_x,image_y,x_pos_dict,y_pos_
 
 
 
-    print "\nStarting to save, chunk ", chunk_num, " of ", num_chunks
+    print ("\nStarting to save, chunk " + str(chunk_num) + " of " + str(num_chunks))
     objects_skipping = []
     for i in range(len(all_objects_with_lc)):
         #if i%400 == 0:
-        #    print float(i)/float(len(all_objects_with_lc)) * 100.0, "% done saving"
+        #    print (float(i)/float(len(all_objects_with_lc)) * 100.0, "% done saving")
         if all_objects_with_lc[i].object_info.length == 0:
-            #print "skipping..."
+            #print ("skipping...")
             objects_skipping.append((all_objects_with_lc[i].object_info.ID, str(all_objects_with_lc[i].aperture_num)))
             continue
         save_lightcurve_to_file(all_objects_with_lc[i], 
@@ -752,7 +755,7 @@ def main():
     try:
         with open(pos_over_time_pickle_filename, "rb") as f:
             x_pos_dict, y_pos_dict = pickle.load(f)
-        print "Pickle file ", pos_over_time_pickle_filename ," found, and opened"
+        print ("Pickle file " + str(pos_over_time_pickle_filename) + " found, and opened")
 
     except IOError:
         raise IOError("No Pickle file ",pos_over_time_pickle_filename," found.")
@@ -767,7 +770,7 @@ def main():
                                                  usecols=(6,7),unpack=True)
     
     ## Now here, we will loop over a number of different chunks, to make memory manageable
-    num_chunks = len(gaiaID_list_full)/chunksize
+    num_chunks = len(gaiaID_list_full)//chunksize
 
     #gaiaID_list = gaiaID_list_full[index_min:index_max]
     #image_x = image_x_full[index_min:index_max]
@@ -779,7 +782,7 @@ def main():
                                                                       image_x_full[iii*chunksize:(iii+1)*chunksize],
                                                                       image_y_full[iii*chunksize:(iii+1)*chunksize],
                                                                       x_pos_dict,y_pos_dict) for iii in list_of_iiis)
-    print all_objects_skipping
+    print (all_objects_skipping)
     quit()
 
     with open("list_of_skipped_objects_iter.txt","w") as f:
