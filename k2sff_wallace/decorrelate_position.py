@@ -38,8 +38,8 @@ min_n_points_in_window_to_decorrelate = 10 # This is the minimum number of light
 #print("*********************************\n\nWe are still doing extra_to_skip\n\n********************************")
 
 # Pickle file for positions over time
-import calculate_posovertime_pickle
-pos_over_time_pickle_filename = calculate_posovertime_pickle.pos_over_time_pickle_filename_touse
+#import calculate_posovertime_pickle
+#pos_over_time_pickle_filename = calculate_posovertime_pickle.pos_over_time_pickle_filename_touse
 
 skip_first_cadence_division = True # Whether to skip the first cadence division, which contains a set of different pointings
 start_cad = 50 # The starting cadence number, when skipping the first set of observations not pointed well
@@ -50,35 +50,18 @@ cadence_number_divisions.insert(0,minimum_value) # To get the first, original bo
 cadence_number_divisions.append(maximum_value) # To get the last bounding value
 
 # Frames to skip, and the cadences to use
-to_skip = pickle.load( open( "../skip_cadences/to_skip.p", "rb" ) ) # normal to skip
+#to_skip = pickle.load( open( "../skip_cadences/to_skip.p", "rb" ) ) # normal to skip
 #cadences = [val for val in range(minimum_value, maximum_value+1) if val not in to_skip] # Set of cadences without the extra_to_skip ones removed
 
-# List of known RR Lyrae
-known_rrlyrae = []
-with open("../match_reference_to_gaia/list_of_rrlyrae.txt", "r") as f:
-    known_rrlyrae = [val.strip("\n") for val in f.readlines()]
+## List of known RR Lyrae
+#known_rrlyrae = []
+#with open("../match_reference_to_gaia/list_of_rrlyrae.txt", "r") as f:
+#    known_rrlyrae = [val.strip("\n") for val in f.readlines()]
 
-# List of stars significantly blended with the RR Lyrae, won't be able to do an accurate decorrelation on the light curves as they are now
-probable_rrlyrae_blends = []
-with open("../match_reference_to_gaia/list_of_rrlyrae_blends.txt", "r") as f:
-    probable_rrlyrae_blends = [val.strip("\n") for val in f.readlines()]
-
-def get_number_of_apertures():
-    """
-    Read in the number of apertures from the photometry files
-    """
-    with open("../run_photometry/re_initial_photometry.sh","r") as f:
-        lines = f.readlines()
-    for line in lines:
-        if "APERTURES=" in line and line[0] != '#':
-            aperture_line = [item.strip("\n") for item in 
-                             line.split("=")[1].split(",")]
-            print("Number of apertures: " + str(len(aperture_line)))
-            break
-    else:
-        raise RuntimeError("Did not find the 'APERTURES' line in the file")
-    return len(aperture_line)
-number_of_apertures = get_number_of_apertures()
+## List of stars significantly blended with the RR Lyrae, won't be able to do an accurate decorrelation on the light curves as they are now
+#probable_rrlyrae_blends = []
+#with open("../match_reference_to_gaia/list_of_rrlyrae_blends.txt", "r") as f:
+#    probable_rrlyrae_blends = [val.strip("\n") for val in f.readlines()]
 
 
 def is_close(a, b, rel_tol=1e-09, abs_tol=0.0):
@@ -197,7 +180,7 @@ class one_object:
             y_touse = self.y_over_time[self.cadence_window_indices[i]:self.cadence_window_indices[i+1]]
 
             # Use PCA to get the two main components of the data
-            pca_touse = PCA(n_components=2, copy=True, svd_solver='auto', random_state=int(self.ID))
+            pca_touse = PCA(n_components=2, copy=True, svd_solver='auto')###, random_state=int(self.ID))
             #print(pca_touse.fit_transform([[x,y] for x,y in zip(x_touse,y_touse)]))
             transformed_positions = pca_touse.fit_transform([[x,y] for x,y in zip(x_touse,y_touse)])
             transformed_x, transformed_y = zip(*transformed_positions)
@@ -290,7 +273,7 @@ class one_object_one_aperture:
         else:
             self.object_info.calc_cadence_window_indices(cad_divisions)
 
-    def pre_decorrelation_filtering():
+    def pre_decorrelation_filtering(self):
         """
         This method filters low-frequency variations from the object's fluxes
         preparatory to the Vanderburg decorrelation.

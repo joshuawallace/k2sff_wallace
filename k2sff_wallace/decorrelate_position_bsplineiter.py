@@ -41,8 +41,8 @@ min_n_points_in_window_to_decorrelate = 10 # This is the minimum number of light
 # to be in a cadence window to run the decorrelation
 
 # Pickle file for positions over time
-import calculate_posovertime_pickle
-pos_over_time_pickle_filename = calculate_posovertime_pickle.pos_over_time_pickle_filename_touse
+#import calculate_posovertime_pickle
+#pos_over_time_pickle_filename = calculate_posovertime_pickle.pos_over_time_pickle_filename_touse
 
 skip_first_cadence_division = True # Whether to skip the first cadence division, which contains a set of different pointings
 start_cad = 50 # The starting cadence number, when skipping the first set of observations not pointed well
@@ -53,25 +53,8 @@ cadence_number_divisions.insert(0,minimum_value) # To get the first, original bo
 cadence_number_divisions.append(maximum_value) # To get the last bounding value
 
 # Frames to skip
-to_skip = pickle.load( open( "../skip_cadences/to_skip.p", "rb" ) ) # normal to skip
+#to_skip = pickle.load( open( "../skip_cadences/to_skip.p", "rb" ) ) # normal to skip
 
-
-def get_number_of_apertures():
-    """
-    Read in the number of apertures from the photometry files
-    """
-    with open("../run_photometry/re_initial_photometry.sh","r") as f:
-        lines = f.readlines()
-    for line in lines:
-        if "APERTURES=" in line and line[0] != '#':
-            aperture_line = [item.strip("\n") for item in 
-                             line.split("=")[1].split(",")]
-            print ("Number of apertures: " + str(len(aperture_line)))
-            break
-    else:
-        raise RuntimeError("Did not find the 'APERTURES' line in the file")
-    return len(aperture_line)
-number_of_apertures = get_number_of_apertures()
 
 
 def is_close(a, b, rel_tol=1e-09, abs_tol=0.0):
@@ -247,7 +230,7 @@ class one_object:
             y_touse = self.y_over_time[self.cadence_window_indices[i]:self.cadence_window_indices[i+1]]
 
             # Use PCA to get the two main components of the data
-            pca_touse = PCA(n_components=2, copy=True, svd_solver='auto', random_state=int(self.ID))
+            pca_touse = PCA(n_components=2, copy=True, svd_solver='auto')#, random_state=int(self.ID))
             transformed_positions = pca_touse.fit_transform([[x,y] for x,y in zip(x_touse,y_touse)])
             transformed_x, transformed_y = zip(*transformed_positions)
 
@@ -405,7 +388,9 @@ class one_object_one_aperture:
                 continue
             n_time_breakpoints = (t_max - t_min)/breakpoint_time_length
             n_time_breakpoints = int(round(n_time_breakpoints))
+            #print (n_time_breakpoints)
             breakpoints = np.linspace(t_min,t_max,num=n_time_breakpoints)
+            #print (breakpoints)
             breakpoints = breakpoints[1:-1]
 
             # put the fluxes and times in temporary arrays
@@ -414,6 +399,10 @@ class one_object_one_aperture:
 
             ## Check that all the breakpoints have data in them, and fix if not
             breakpoint_to_remove = check_breakpoints_have_data_between(x,breakpoints)
+            print (min(x))
+            print (max(x))
+            print (breakpoints)
+            print (breakpoint_to_remove)
             # Remove those values
             if breakpoint_to_remove:
                 print ("&&&&&&&&&&&&&&&&")
@@ -589,7 +578,7 @@ def vanderburg_decorrelation(an_object_an_aperture,iternum):
                 means_across_bins[-2] = means_across_bins[-3] + .5*(means_across_bins[-3] - means_across_bins[-4])
 
             if means_across_bins[0] < 0.:
-                print ("Zero first bin       " + str(len(binned_data[0])) + "  " + an_object_an_aperture.object_info.ID + "  " + stran_object_an_aperture.aperture_num))
+                print ("Zero first bin       " + str(len(binned_data[0])) + "  " + an_object_an_aperture.object_info.ID + "  " + str(an_object_an_aperture.aperture_num))
                 print ("iter num: " + str(iternum))
                 print (binned_data[0])
 
