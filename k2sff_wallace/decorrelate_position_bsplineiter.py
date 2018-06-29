@@ -177,7 +177,7 @@ def flatten_and_decorrelate(obj):
 
 
 class one_object:
-    def __init__(self,ID_,cadence_nos_,BJD_,image_x_,image_y_,x_over_time_,y_over_time_):
+    def __init__(self,ID_,cadence_nos_,BJD_,x_over_time_,y_over_time_):
         # Some checking
         if len(x_over_time_) != len(cadence_nos_) or len(y_over_time_) != len(cadence_nos_) or len(BJD_) != len(cadence_nos_):
             raise RuntimeError("The lengths of the x_pos or y_pos or BJD are different from the length of cadences in one_object")
@@ -187,8 +187,6 @@ class one_object:
         self.x_over_time = list(x_over_time_)
         self.y_over_time = list(y_over_time_)
         self.BJD = list(BJD_)
-        self.image_x = image_x_
-        self.image_y = image_y_
         self.length = len(self.cadence_nos)
         self.cadence_window_indices = None
         self.arc_length = None
@@ -261,15 +259,14 @@ class one_object:
 
 class one_object_one_aperture:
     def __init__(self,one_object_instance,magnitudes,errors,
-                 cad_divisions,aperture_number):
+                 cad_divisions):
         if not isinstance(one_object_instance,one_object):
             raise RuntimeError("I was not given a one_object instance!")
         if len(magnitudes) != one_object_instance.length:
             raise RuntimeError("The magnitudes are not the same length as the one_object instance!")
-        if len(magnitudes) != len(errors) 
+        if len(magnitudes) != len(errors):
             raise RuntimeError("The magnitudes or errors are not the same length!")
         self.object_info = copy.deepcopy(one_object_instance)
-        self.aperture_num = aperture_number
         self.magnitudes = magnitudes
         self.errors = errors
         self.decorr_flux = None
@@ -307,7 +304,7 @@ class one_object_one_aperture:
         # Now, if skip_first_cadence_division is True, remove all those points
         # from the object so we don't even consider them.
             if skip_first_cadence_division:
-                filtered = filter(lambda o: o[4]>=start_cad, zip(self.magnitudes,self.errors,
+                filtered = filter(lambda o: o[2]>=start_cad, zip(self.magnitudes,self.errors,
                                                             self.object_info.cadence_nos,
                                                             self.object_info.BJD,
                                                             self.object_info.x_over_time,
@@ -627,8 +624,6 @@ def save_lightcurve_to_file(an_object_ap_instance, output_filename,comments=None
             str_to_write = "%-15.8f %4d %11.7f %11.7f %9.5f %9.5f %10.5f %10.5f\n" %\
                 (an_object_ap_instance.object_info.BJD[i],
                  an_object_ap_instance.object_info.cadence_nos[i],
-                 an_object_ap_instance.object_info.image_x,
-                 an_object_ap_instance.object_info.image_y,
                  an_object_ap_instance.decorr_magnitudes[i],
                  an_object_ap_instance.errors[i])
             f.write(str_to_write)
