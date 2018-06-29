@@ -260,20 +260,18 @@ class one_object:
 
 
 class one_object_one_aperture:
-    def __init__(self,one_object_instance,magnitudes,errors,centroid_x,centroid_y,
+    def __init__(self,one_object_instance,magnitudes,errors,
                  cad_divisions,aperture_number):
         if not isinstance(one_object_instance,one_object):
             raise RuntimeError("I was not given a one_object instance!")
         if len(magnitudes) != one_object_instance.length:
             raise RuntimeError("The magnitudes are not the same length as the one_object instance!")
-        if len(magnitudes) != len(errors) or len(magnitudes) != len(centroid_x) or len(magnitudes) != len(centroid_y):
-            raise RuntimeError("The magnitudes, errors, or centroids are not the same length!")
+        if len(magnitudes) != len(errors) 
+            raise RuntimeError("The magnitudes or errors are not the same length!")
         self.object_info = copy.deepcopy(one_object_instance)
         self.aperture_num = aperture_number
         self.magnitudes = magnitudes
         self.errors = errors
-        self.centroid_x = centroid_x
-        self.centroid_y = centroid_y
         self.decorr_flux = None
         self.decorr_normalized_fluxes = None
         self.decorr_magnitudes = None
@@ -287,8 +285,8 @@ class one_object_one_aperture:
         # Now, remove nan's from the light curve, and remove the corresponding values
         # (like cadence number) from the object info
         filtered = filter(lambda o: not np.isnan(o[0]), #and int(o[4]) not in extra_to_skip,
-                                                        zip(self.magnitudes,self.errors,self.centroid_x,
-                                                            self.centroid_y,self.object_info.cadence_nos,
+                                                        zip(self.magnitudes,self.errors,
+                                                            self.object_info.cadence_nos,
                                                             self.object_info.BJD,
                                                             self.object_info.x_over_time,
                                                             self.object_info.y_over_time,
@@ -296,28 +294,26 @@ class one_object_one_aperture:
         if len(filtered) == 0:
             self.magnitudes = []
             self.errors = []
-            self.centroid_x = []
-            self.centroid_y = []
             self.object_info.cadence_nos = []
             self.object_info.BJD = []
             self.object_info.x_over_time = []
             self.object_info.y_over_time = []
             self.object_info.arc_length = []
         else:
-            self.magnitudes,self.errors,self.centroid_x,self.centroid_y,self.object_info.cadence_nos,\
+            self.magnitudes,self.errors,self.object_info.cadence_nos,\
                 self.object_info.BJD,self.object_info.x_over_time,\
                 self.object_info.y_over_time,self.object_info.arc_length = zip(*filtered)
 
         # Now, if skip_first_cadence_division is True, remove all those points
         # from the object so we don't even consider them.
             if skip_first_cadence_division:
-                filtered = filter(lambda o: o[4]>=start_cad, zip(self.magnitudes,self.errors,self.centroid_x,
-                                                            self.centroid_y,self.object_info.cadence_nos,
+                filtered = filter(lambda o: o[4]>=start_cad, zip(self.magnitudes,self.errors,
+                                                            self.object_info.cadence_nos,
                                                             self.object_info.BJD,
                                                             self.object_info.x_over_time,
                                                             self.object_info.y_over_time,
                                                             self.object_info.arc_length))
-                self.magnitudes,self.errors,self.centroid_x,self.centroid_y,self.object_info.cadence_nos,\
+                self.magnitudes,self.errors,self.object_info.cadence_nos,\
                     self.object_info.BJD,self.object_info.x_over_time,\
                     self.object_info.y_over_time,self.object_info.arc_length = zip(*filtered)
 
@@ -633,8 +629,6 @@ def save_lightcurve_to_file(an_object_ap_instance, output_filename,comments=None
                  an_object_ap_instance.object_info.cadence_nos[i],
                  an_object_ap_instance.object_info.image_x,
                  an_object_ap_instance.object_info.image_y,
-                 an_object_ap_instance.centroid_x[i],
-                 an_object_ap_instance.centroid_y[i],
                  an_object_ap_instance.decorr_magnitudes[i],
                  an_object_ap_instance.errors[i])
             f.write(str_to_write)
